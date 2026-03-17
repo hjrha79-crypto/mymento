@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#0f0e0c"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="MyMento"/>
+  <title>MyMento</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+KR:wght@300;400&display=swap" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background: #0f0e0c;
+    }
+    @keyframes pulse {
+      0%,100% { transform: scale(0.6); opacity: 0.3; }
+      50% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes breathe {
+      0%,100% { box-shadow: 0 0 0 0 rgba(201,169,110,0); }
+      50% { box-shadow: 0 0 20px 5px rgba(201,169,110,0.12); }
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .bub { animation: fadeUp 0.4s ease forwards; }
+    .card { animation: slideIn 0.4s ease forwards; }
+    textarea { resize: none; -webkit-appearance: none; }
+    textarea:focus { outline: none; }
+    textarea::placeholder { color: #3a3530; }
+    ::-webkit-scrollbar { width: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    const MENTOR_TYPES = [
+      {
+        id: "teacher",
+        label: "스승",
+        sub: "깊고 묵직한 통찰",
+        prompt: `당신은 깊은 통찰을 가진 스승입니다. 말이 많지 않고, 한 마디 한 마디에 무게가 있습니다. 쉽게 동조하지 않고, 본질을 짚습니다. 말투는 간결하고 담담합니다. "~하게" "~하지" 같은 어투를 자연스럽게 씁니다. 설교하지 않지만, 핵심을 비껴가지도 않습니다.`
+      },
+      {
+        id: "senior",
+        label: "선배",
+        sub: "현실적이고 솔직한 조언",
+        prompt: `당신은 경험 많은 선배입니다. 형식 없이 솔직하게 말합니다. 공감도 하지만 현실적인 시각도 줍니다. 말투는 편하고 자연스럽습니다. 가끔 직설적으로 말할 때도 있습니다. 너무 부드럽거나 조심스럽지 않습니다.`
+      },
+      {
+        id: "father",
+        label: "아버지",
+        sub: "따뜻하고 든든한 지지",
+        prompt: `당신은 따뜻한 아버지 같은 멘토입니다. 판단하지 않고 먼저 받아줍니다. 말투는 온화하고 든든합니다. 많은 말 없이도 안심이 되는 느낌을 줍니다. 걱정보다는 믿음을 표현합니다. "잘 하고 있어" "천천히 해도 돼" 같은 말이 자연스럽습니다.`
+      },
+      {
+        id: "professor",
+        label: "교수",
+        sub: "논리적이고 체계적인 시각",
+        prompt: `당신은 논리적인 교수 같은 멘토입니다. 감정보다 구조와 원인을 먼저 봅니다. 말투는 차분하고 분석적입니다. 문제를 구조화해서 다른 시각을 제공합니다. 단, 강의하듯 길게 말하지 않습니다. 핵심만 짧게.`
+      }
+    ];
+
+    const BASE_RULES = `
+## 공통 규칙
+- 한 번에 질문 하나만. 항상 질문으로 끝낼 필요 없음.
+- 형식적인 공감 금지. 진짜 반응을 하세요.
+- 5문장 넘지 말 것.
+- 번호나 목록 사용 금지.
+- 매번 같은 패턴으로 끝내지 말 것.
+- 한국어로 대화.
+
+## 질문 엔진
+- 감정이 격할 때: 감정 먼저 받아주기
+- 안정됐을 때: 성찰 질문
+- 성찰 이후: 행동 질문
+- 마지막: 전략적 관점
+`;
+
+    const TypingDots = () => (
+      <div style={{ display:"flex", gap:5, padding:"4px 0", alignItems:"center" }}>
+        {[0,1,2].map(i => (
+          <div key={i} style={{
+            width:7, height:7, borderRadius:"50%", background:"#c9a96e",
+            animation:"pulse 1.2s ease-in-out infinite",
+            animationDelay:`${i*0.2}s`
+          }}/>
+        ))}
+      </div>
+    );
+
+    function MyMento() {
+      const [mentor, setMentor] = useState(null);
+      const [messages, setMessages] = useState([]);
+      const [input, setInput] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem("mm_api_key") || "");
+      const [showKeyInput, setShowKeyInput] = useState(false);
+      const bottomRef = useRef(null);
+      const taRef = useRef(null);
+
+      useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior:"smooth" });
+      }, [messages, loading]);
+
+      useEffect(() => {
+        if (taRef.current) {
+          taRef.current.style.height = "auto";
+          taRef.current.style.height = Math.min(taRef.current.scrollHeight, 100) + "px";
+        }
+      }, [input]);
+
+      const saveKey = (key) => {
+        setApiKey(key);
+        localStorage.setItem("mm_api_key", key);
+        setShowKeyInput(false);
+      };
+
+      const selectMentor = (m) => {
+        if (!apiKey) { setShowKeyInput(true); return; }
+        setMentor(m);
+        setMessages([]);
+      };
+
+      const reset = () => { setMentor(null); setMessages([]); setInput(""); };
+
+      const send = async () => {
+        if (!input.trim() || loading || !mentor || !apiKey) return;
+        const text = input.trim();
+        setInput("");
+        const newMsgs = [...messages, { role:"user", content:text }];
+        setMessages(newMsgs);
+        setLoading(true);
+        try {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method:"POST",
+            headers:{
+              "Content-Type":"application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+              "anthropic-dangerous-direct-browser-access": "true"
+            },
+            body: JSON.stringify({
+              model:"claude-sonnet-4-20250514",
+              max_tokens:1000,
+              system: mentor.prompt + BASE_RULES,
+              messages:newMsgs
+            })
+          });
+          const data = await res.json();
+          const reply = data.content?.[0]?.text || "잠시 후 다시 시도해 주세요.";
+          setMessages([...newMsgs, { role:"assistant", content:reply }]);
+        } catch {
+          setMessages([...newMsgs, { role:"assistant", content:"연결 오류가 생겼어요." }]);
+        }
+        setLoading(false);
+      };
+
+      const started = messages.length > 0;
+
+      // API Key 입력 화면
+      if (showKeyInput) {
+        return (
+          <div style={{ height:"100%", display:"flex", flexDirection:"column", justifyContent:"center", alignItems:"center", background:"#0f0e0c", padding:32, fontFamily:"'Noto Serif KR', Georgia, serif" }}>
+            <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:22, fontWeight:300, color:"#c9a96e", marginBottom:12, letterSpacing:"0.1em" }}>MyMento</div>
+            <p style={{ fontSize:13, color:"#4a4540", marginBottom:32, textAlign:"center", lineHeight:1.8 }}>Anthropic API 키를 입력해주세요.<br/>키는 기기에만 저장됩니다.</p>
+            <input
+              type="password"
+              placeholder="sk-ant-..."
+              defaultValue={apiKey}
+              id="keyInput"
+              style={{ width:"100%", maxWidth:320, background:"#141210", border:"1px solid #252220", borderRadius:12, padding:"12px 16px", color:"#c4b8a4", fontSize:14, fontFamily:"inherit" }}
+            />
+            <button
+              onClick={() => saveKey(document.getElementById("keyInput").value.trim())}
+              style={{ marginTop:16, width:"100%", maxWidth:320, background:"#c9a96e", border:"none", borderRadius:12, padding:"12px", color:"#0f0e0c", fontSize:14, fontFamily:"inherit", cursor:"pointer", fontWeight:400 }}
+            >저장하고 시작하기</button>
+            <button onClick={() => setShowKeyInput(false)} style={{ marginTop:10, background:"none", border:"none", color:"#3a3530", fontSize:12, fontFamily:"inherit", cursor:"pointer" }}>취소</button>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ height:"100%", display:"flex", flexDirection:"column", background:"#0f0e0c", fontFamily:"'Noto Serif KR', Georgia, serif" }}>
+          {/* 헤더 */}
+          <div style={{ padding:"16px 18px 14px", borderBottom:"1px solid #1e1c18", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+            <div>
+              <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:20, fontWeight:300, color:"#c9a96e", letterSpacing:"0.1em" }}>MyMento</div>
+              {mentor && <div style={{ fontSize:10, color:"#4a4030", letterSpacing:"0.14em", marginTop:2 }}>{mentor.label} 모드</div>}
+            </div>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <button onClick={() => setShowKeyInput(true)} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#3a3530" strokeWidth="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#3a3530" strokeWidth="1.5"/></svg>
+              </button>
+              {mentor && <button onClick={reset} style={{ background:"none", border:"1px solid #2a2520", borderRadius:20, padding:"5px 12px", color:"#4a4540", fontSize:11, fontFamily:"inherit", cursor:"pointer" }}>처음으로</button>}
+            </div>
+          </div>
+
+          {/* 본문 */}
+          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column" }}>
+            {!mentor && (
+              <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"32px 20px" }}>
+                <div style={{ textAlign:"center", marginBottom:32 }}>
+                  <div style={{ width:46, height:46, borderRadius:"50%", border:"1px solid #2a2520", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px", animation:"breathe 3s ease-in-out infinite" }}>
+                    <div style={{ width:7, height:7, borderRadius:"50%", background:"#c9a96e", opacity:0.9 }}/>
+                  </div>
+                  <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:17, fontWeight:300, color:"#7a6e60", lineHeight:1.8, letterSpacing:"0.05em" }}>오늘 어떤 멘토가 필요한가요?</p>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  {MENTOR_TYPES.map((m, i) => (
+                    <button key={m.id} className="card" onClick={() => selectMentor(m)} style={{ background:"#141210", border:"1px solid #252220", borderRadius:16, padding:"16px 20px", cursor:"pointer", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center", fontFamily:"inherit", animationDelay:`${i*0.08}s`, opacity:0 }}>
+                      <div>
+                        <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:18, fontWeight:300, color:"#c9a96e", letterSpacing:"0.08em", marginBottom:4 }}>{m.label}</div>
+                        <div style={{ fontSize:11, color:"#4a4540", letterSpacing:"0.1em" }}>{m.sub}</div>
+                      </div>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="#3a3530" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {mentor && (
+              <div style={{ flex:1, padding:"20px 18px 8px", display:"flex", flexDirection:"column", gap:22 }}>
+                {!started && (
+                  <div style={{ textAlign:"center", padding:"40px 0 20px", animation:"fadeUp 0.5s ease forwards" }}>
+                    <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:17, fontWeight:300, color:"#5a5248", lineHeight:1.9 }}>
+                      {mentor.label}으로서 함께하겠습니다.<br/>
+                      <span style={{ fontSize:14, color:"#3a3530" }}>무엇이든 꺼내보세요</span>
+                    </p>
+                  </div>
+                )}
+                {messages.map((msg, i) => (
+                  <div key={i} className="bub" style={{ display:"flex", justifyContent:msg.role==="user"?"flex-end":"flex-start" }}>
+                    {msg.role==="user" ? (
+                      <div style={{ maxWidth:"78%", background:"#1c1a16", border:"1px solid #272420", borderRadius:"18px 18px 4px 18px", padding:"11px 15px", fontSize:14, color:"#9a8e7e", lineHeight:1.75 }}>{msg.content}</div>
+                    ) : (
+                      <div style={{ maxWidth:"88%" }}>
+                        <div style={{ fontSize:9, color:"#4a4030", letterSpacing:"0.2em", marginBottom:7 }}>{mentor.label.toUpperCase()}</div>
+                        <div style={{ fontSize:15, color:"#d0c4b0", lineHeight:1.95, letterSpacing:"0.03em", fontWeight:300 }}>{msg.content}</div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {loading && (
+                  <div className="bub">
+                    <div style={{ fontSize:9, color:"#4a4030", letterSpacing:"0.2em", marginBottom:7 }}>{mentor.label.toUpperCase()}</div>
+                    <TypingDots/>
+                  </div>
+                )}
+                <div ref={bottomRef}/>
+              </div>
+            )}
+          </div>
+
+          {/* 입력창 */}
+          {mentor && (
+            <div style={{ padding:"10px 14px 16px", borderTop:"1px solid #1e1c18", flexShrink:0, background:"#0f0e0c" }}>
+              <div style={{ display:"flex", alignItems:"flex-end", gap:10, background:"#141210", border:"1px solid #252220", borderRadius:20, padding:"10px 12px" }}>
+                <textarea
+                  ref={taRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); }}}
+                  placeholder={started?"계속 이야기해 주세요...":"오늘 있었던 일을 적어보세요..."}
+                  rows={1}
+                  style={{ flex:1, background:"none", border:"none", color:"#c4b8a4", fontSize:15, fontFamily:"'Noto Serif KR',serif", lineHeight:1.65, minHeight:26 }}
+                />
+                <button
+                  onClick={send}
+                  disabled={!input.trim()||loading}
+                  style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:input.trim()&&!loading?"#c9a96e":"#222018", border:"none", cursor:input.trim()&&!loading?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", transition:"background 0.2s" }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke={input.trim()&&!loading?"#0f0e0c":"#3a3530"} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<MyMento/>);
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js");
+      });
+    }
+  </script>
+</body>
+</html>
