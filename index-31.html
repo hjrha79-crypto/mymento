@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#0f0e0c"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="MyMento"/>
+  <title>MyMento</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Noto+Serif+KR:wght@300;400&display=swap" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; width: 100%; overflow: hidden; background: #0f0e0c; }
+    @keyframes pulse    { 0%,100%{transform:scale(0.6);opacity:0.3;}50%{transform:scale(1);opacity:1;} }
+    @keyframes fadeUp   { from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);} }
+    @keyframes breathe  { 0%,100%{box-shadow:0 0 0 0 rgba(201,169,110,0);}50%{box-shadow:0 0 20px 5px rgba(201,169,110,0.12);} }
+    @keyframes slideIn  { from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);} }
+    .bub  { animation: fadeUp  0.4s ease forwards; }
+    .card { animation: slideIn 0.4s ease forwards; }
+    textarea { resize:none; -webkit-appearance:none; }
+    textarea:focus { outline:none; }
+    textarea::placeholder { color:#3a3530; }
+    ::-webkit-scrollbar { width:0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    // ── Config ──────────────────────────────────────────────────────
+    const loadCfg = () => ({
+      apiKey:    localStorage.getItem("mm_api_key")  || "",
+      sbUrl:     localStorage.getItem("mm_sb_url")   || "",
+      sbAnon:    localStorage.getItem("mm_sb_anon")  || "",
+      userId:    localStorage.getItem("mm_user_id")  || "",
+    });
+    const saveCfg = c => {
+      localStorage.setItem("mm_api_key",  c.apiKey);
+      localStorage.setItem("mm_sb_url",   c.sbUrl);
+      localStorage.setItem("mm_sb_anon",  c.sbAnon);
+      localStorage.setItem("mm_user_id",  c.userId);
+    };
+    const getSB = (url, key) => (url && key) ? supabase.createClient(url, key) : null;
+    const genSid = () => "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+
+    // ── 멘토 정의 ───────────────────────────────────────────────────
+    const MENTORS = [
+      { id:"teacher",   label:"스승",   sub:"깊고 묵직한 통찰",         prompt:`당신은 깊은 통찰을 가진 스승입니다. 말이 많지 않고, 한 마디 한 마디에 무게가 있습니다. 쉽게 동조하지 않고, 본질을 짚습니다. 말투는 간결하고 담담합니다. "~하게" "~하지" 같은 어투를 씁니다. 설교하지 않지만, 핵심을 비껴가지도 않습니다.` },
+      { id:"senior",    label:"선배",   sub:"현실적이고 솔직한 조언",   prompt:`당신은 경험 많은 선배입니다. 형식 없이 솔직하게 말합니다. 공감도 하지만 현실적인 시각도 줍니다. 말투는 편하고 자연스럽습니다. 가끔 직설적으로 말할 때도 있습니다.` },
+      { id:"father",    label:"아버지", sub:"따뜻하고 든든한 지지",     prompt:`당신은 따뜻한 아버지 같은 멘토입니다. 판단하지 않고 먼저 받아줍니다. 말투는 온화하고 든든합니다. 걱정보다는 믿음을 표현합니다. "잘 하고 있어" "천천히 해도 돼" 같은 말이 자연스럽습니다.` },
+      { id:"professor", label:"교수",   sub:"논리적이고 체계적인 시각", prompt:`당신은 논리적인 교수 같은 멘토입니다. 감정보다 구조와 원인을 먼저 봅니다. 말투는 차분하고 분석적입니다. 문제를 구조화해서 다른 시각을 제공합니다. 핵심만 짧게.` },
+    ];
+
+    const BASE_RULES = `
+## 공통 규칙
+- 한 번에 질문 하나만. 항상 질문으로 끝낼 필요 없음.
+- 형식적인 공감 금지. 진짜 반응을 하세요.
+- 5문장 넘지 말 것.
+- 번호나 목록 사용 금지.
+- 매번 같은 패턴으로 끝내지 말 것.
+- 한국어로 대화.
+## 질문 엔진
+- 감정이 격할 때: 감정 먼저 받아주기
+- 안정됐을 때: 성찰 질문
+- 성찰 이후: 행동 질문
+- 마지막: 전략적 관점
+`;
+
+    // ── 미루기 플로우 정의 ──────────────────────────────────────────
+    // step: 0=감정확인, 1=문제구체화, 2=원인분해, 3=행동축소, 4=실행유도, 5=완료
+    const PROCRAS_STEPS = [
+      {
+        id: 0, label: "감정 확인",
+        botMsg: "지금 어떤 느낌인가요?",
+        chips: ["귀찮음", "피곤함", "막막함", "부담"],
+        inputHint: "지금 기분을 말해주세요...",
+      },
+      {
+        id: 1, label: "문제 구체화",
+        botMsg: "지금 미루고 있는 게 정확히 무엇인가요?",
+        chips: [],
+        inputHint: "미루고 있는 일을 적어주세요...",
+      },
+      {
+        id: 2, label: "원인 파악",
+        botMsg: "왜 하기 싫을까요?",
+        chips: ["너무 크게 느껴진다", "어떻게 할지 모르겠다", "재미가 없다", "지쳐있다"],
+        inputHint: "솔직하게 말해주세요...",
+      },
+      {
+        id: 3, label: "행동 축소",
+        botMsg: "지금 당장 1분 안에 할 수 있는 건 뭘까요?",
+        chips: ["파일 열기", "첫 줄만 쓰기", "하나만 확인하기", "직접 입력"],
+        inputHint: "아주 작은 행동 하나만...",
+      },
+      {
+        id: 4, label: "실행",
+        botMsg: null, // AI가 생성
+        chips: ["했어요 ✓"],
+        inputHint: "완료하셨으면 '했어요'라고 해주세요...",
+      },
+      {
+        id: 5, label: "완료",
+        botMsg: null, // AI가 생성
+        chips: [],
+        inputHint: "",
+      },
+    ];
+
+    // ── 공통 컴포넌트 ────────────────────────────────────────────────
+    const TypingDots = () => (
+      <div style={{display:"flex",gap:5,padding:"4px 0",alignItems:"center"}}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{width:7,height:7,borderRadius:"50%",background:"#c9a96e",animation:"pulse 1.2s ease-in-out infinite",animationDelay:`${i*0.2}s`}}/>
+        ))}
+      </div>
+    );
+
+    const Chip = ({label, onClick}) => (
+      <button onClick={onClick} style={{background:"#1c1a16",border:"1px solid #2a2520",borderRadius:20,padding:"7px 14px",color:"#7a6e60",fontSize:12,fontFamily:"'Noto Serif KR',serif",cursor:"pointer",whiteSpace:"nowrap",letterSpacing:"0.05em"}}>
+        {label}
+      </button>
+    );
+
+    // ── 설정 화면 ────────────────────────────────────────────────────
+    function SettingsScreen({current, onSave, onCancel}) {
+      const [f, setF] = useState(current);
+      const s = (k,v) => setF(p=>({...p,[k]:v}));
+      return (
+        <div style={{height:"100%",display:"flex",flexDirection:"column",justifyContent:"center",background:"#0f0e0c",padding:"32px 24px",fontFamily:"'Noto Serif KR',Georgia,serif",overflowY:"auto"}}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,fontWeight:300,color:"#c9a96e",marginBottom:6,letterSpacing:"0.1em"}}>설정</div>
+          <p style={{fontSize:11,color:"#3a3530",marginBottom:28,lineHeight:1.8}}>입력한 키는 이 기기에만 저장됩니다.</p>
+          {[
+            {k:"apiKey",  lb:"Anthropic API Key", ph:"sk-ant-..."},
+            {k:"sbUrl",   lb:"Supabase URL",       ph:"https://xxx.supabase.co"},
+            {k:"sbAnon",  lb:"Supabase Anon Key",  ph:"eyJ..."},
+            {k:"userId",  lb:"User ID (UUID)",      ph:"VitaCore user_id"},
+          ].map(({k,lb,ph})=>(
+            <div key={k} style={{marginBottom:16}}>
+              <div style={{fontSize:10,color:"#4a4030",letterSpacing:"0.14em",marginBottom:6}}>{lb}</div>
+              <input type="password" value={f[k]} onChange={e=>s(k,e.target.value)} placeholder={ph}
+                style={{width:"100%",background:"#141210",border:"1px solid #252220",borderRadius:10,padding:"10px 14px",color:"#c4b8a4",fontSize:13,fontFamily:"inherit"}}/>
+            </div>
+          ))}
+          <button onClick={()=>onSave(f)} style={{marginTop:8,width:"100%",background:"#c9a96e",border:"none",borderRadius:12,padding:13,color:"#0f0e0c",fontSize:14,fontFamily:"inherit",cursor:"pointer"}}>저장</button>
+          {onCancel && <button onClick={onCancel} style={{marginTop:10,background:"none",border:"none",color:"#3a3530",fontSize:12,fontFamily:"inherit",cursor:"pointer",width:"100%"}}>취소</button>}
+        </div>
+      );
+    }
+
+    // ── 기록 화면 ────────────────────────────────────────────────────
+    function HistoryScreen({sbClient, userId, onBack}) {
+      const [rows, setRows]     = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [tab, setTab]       = useState("reflection"); // reflection | procrastination
+
+      useEffect(()=>{
+        if (!sbClient || !userId) { setLoading(false); return; }
+        sbClient.from("reflection")
+          .select("*").eq("user_id", userId)
+          .order("created_at", {ascending:false}).limit(200)
+          .then(({data})=>{ setRows(data||[]); setLoading(false); });
+      },[]);
+
+      const filtered = rows.filter(r => tab === "procrastination" ? r.session_type === "procrastination" : r.session_type !== "procrastination");
+      const grouped  = filtered.reduce((acc,r)=>{ (acc[r.session_id]=acc[r.session_id]||[]).push(r); return acc; },{});
+      const fmt      = ts => new Date(ts).toLocaleDateString("ko-KR",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      const mLabel   = id => MENTORS.find(m=>m.id===id)?.label || id;
+
+      return (
+        <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#0f0e0c",fontFamily:"'Noto Serif KR',Georgia,serif"}}>
+          <div style={{padding:"16px 18px 14px",borderBottom:"1px solid #1e1c18",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,fontWeight:300,color:"#c9a96e",letterSpacing:"0.1em"}}>기록</div>
+            <button onClick={onBack} style={{background:"none",border:"1px solid #2a2520",borderRadius:20,padding:"5px 12px",color:"#4a4540",fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>돌아가기</button>
+          </div>
+          {/* 탭 */}
+          <div style={{display:"flex",borderBottom:"1px solid #1a1816",flexShrink:0}}>
+            {[["reflection","멘토 대화"],["procrastination","미루기 해결"]].map(([v,lb])=>(
+              <button key={v} onClick={()=>setTab(v)} style={{flex:1,padding:"10px",background:"none",border:"none",color:tab===v?"#c9a96e":"#3a3530",fontSize:12,fontFamily:"inherit",cursor:"pointer",borderBottom:tab===v?"1px solid #c9a96e":"none",letterSpacing:"0.08em"}}>
+                {lb}
+              </button>
+            ))}
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"16px 18px"}}>
+            {loading && <p style={{color:"#3a3530",fontSize:13,textAlign:"center",marginTop:40}}>불러오는 중...</p>}
+            {!loading && Object.keys(grouped).length===0 && (
+              <p style={{color:"#3a3530",fontSize:13,textAlign:"center",marginTop:40,lineHeight:1.8}}>아직 기록이 없습니다.</p>
+            )}
+            {!loading && Object.entries(grouped).map(([sid,items])=>(
+              <div key={sid} style={{marginBottom:24,paddingBottom:20,borderBottom:"1px solid #1a1816"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                  <span style={{fontSize:10,color:"#c9a96e",letterSpacing:"0.12em"}}>
+                    {tab==="procrastination" ? "미루기 해결" : mLabel(items[0].mentor_type)}
+                  </span>
+                  <span style={{fontSize:10,color:"#3a3530"}}>{fmt(items[0].created_at)}</span>
+                </div>
+                {items.map((r,i)=>(
+                  <div key={i} style={{marginBottom:12}}>
+                    <div style={{fontSize:12,color:"#5a5040",lineHeight:1.8,marginBottom:4}}>{r.question}</div>
+                    <div style={{fontSize:13,color:"#d0c4b0",lineHeight:1.8}}>{r.answer}</div>
+                    {r.next_action && <div style={{marginTop:6,padding:"6px 10px",background:"#141210",borderRadius:8,fontSize:11,color:"#c9a96e"}}>→ {r.next_action}</div>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── 미루기 해결 화면 ─────────────────────────────────────────────
+    function ProcrasScreen({config, sbClient, onBack}) {
+      const [step, setStep]         = useState(0);
+      const [messages, setMessages] = useState([]);
+      const [input, setInput]       = useState("");
+      const [loading, setLoading]   = useState(false);
+      const [answers, setAnswers]   = useState({}); // step별 답변 저장
+      const [sessionId]             = useState(genSid);
+      const [done, setDone]         = useState(false);
+      const bottomRef = useRef(null);
+      const taRef     = useRef(null);
+
+      // 첫 메시지 삽입
+      useEffect(()=>{
+        setMessages([{role:"bot", text: PROCRAS_STEPS[0].botMsg}]);
+      },[]);
+
+      useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,loading]);
+      useEffect(()=>{
+        if (taRef.current) {
+          taRef.current.style.height="auto";
+          taRef.current.style.height=Math.min(taRef.current.scrollHeight,100)+"px";
+        }
+      },[input]);
+
+      const saveRow = async (question, answer, nextAction) => {
+        if (!sbClient || !config.userId) return;
+        await sbClient.from("reflection").insert({
+          user_id:      config.userId,
+          session_id:   sessionId,
+          session_type: "procrastination",
+          mentor_type:  "system",
+          question,
+          answer,
+          next_action:  nextAction || null,
+          status:       "done",
+        });
+      };
+
+      const callAI = async (systemPrompt, userMsg) => {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","x-api-key":config.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body: JSON.stringify({model:"claude-sonnet-4-20250514", max_tokens:300, system:systemPrompt, messages:[{role:"user",content:userMsg}]})
+        });
+        const d = await res.json();
+        return d.content?.[0]?.text || "";
+      };
+
+      const proceed = async (userInput) => {
+        if (!userInput.trim()) return;
+        const currentStep = PROCRAS_STEPS[step];
+
+        // 유저 메시지 추가
+        const newMsgs = [...messages, {role:"user", text:userInput}];
+        setMessages(newMsgs);
+        setInput("");
+        setAnswers(prev=>({...prev,[step]:userInput}));
+        setLoading(true);
+
+        const nextStep = step + 1;
+
+        try {
+          if (nextStep === 4) {
+            // STEP 4: 행동 축소 완료 → AI가 실행 유도 메시지 생성
+            const prompt = `사용자가 미루던 일을 해결하는 중입니다.
+감정: ${answers[0]||"미입력"}
+미루던 일: ${answers[1]||"미입력"}
+원인: ${answers[2]||"미입력"}
+지금 할 행동: ${userInput}
+
+이제 "지금 바로 해보세요. 끝나면 '했어요'라고 말해주세요." 와 같은 짧은 실행 유도 메시지를 써주세요.
+격려하되, 1~2문장. 절대 길게 설명하지 마세요.`;
+            const aiMsg = await callAI(prompt, userInput);
+            await saveRow(currentStep.botMsg || "지금 당장 1분 안에 할 수 있는 건?", userInput, userInput);
+            setMessages([...newMsgs, {role:"bot", text:aiMsg}]);
+            setStep(4);
+
+          } else if (step === 4) {
+            // STEP 5: 완료 피드백
+            const prompt = `사용자가 미루던 일을 드디어 시작했습니다.
+미루던 일: ${answers[1]||"미입력"}
+실행한 행동: ${answers[3]||userInput}
+
+짧고 따뜻하게 완료 피드백을 해주세요. 2문장 이내. 자기계발 강의 스타일 금지.`;
+            const aiMsg = await callAI(prompt, userInput);
+            await saveRow("실행 완료", userInput, null);
+            setMessages([...newMsgs, {role:"bot", text:aiMsg}]);
+            setStep(5);
+            setDone(true);
+
+          } else {
+            // STEP 1~3: 다음 질문으로
+            const nextStepDef = PROCRAS_STEPS[nextStep];
+            await saveRow(currentStep.botMsg || "", userInput, null);
+            setMessages([...newMsgs, {role:"bot", text:nextStepDef.botMsg}]);
+            setStep(nextStep);
+          }
+        } catch {
+          setMessages([...newMsgs, {role:"bot", text:"연결 오류가 생겼어요."}]);
+        }
+        setLoading(false);
+      };
+
+      const currentStepDef = PROCRAS_STEPS[step];
+
+      return (
+        <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#0f0e0c",fontFamily:"'Noto Serif KR',Georgia,serif"}}>
+          {/* 헤더 */}
+          <div style={{padding:"16px 18px 14px",borderBottom:"1px solid #1e1c18",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div>
+              <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,fontWeight:300,color:"#c9a96e",letterSpacing:"0.1em"}}>미루기 해결</div>
+              {!done && <div style={{fontSize:10,color:"#4a4030",letterSpacing:"0.12em",marginTop:2}}>{currentStepDef.label} · {step+1}/6</div>}
+            </div>
+            <button onClick={onBack} style={{background:"none",border:"1px solid #2a2520",borderRadius:20,padding:"5px 12px",color:"#4a4540",fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>처음으로</button>
+          </div>
+
+          {/* 진행 바 */}
+          {!done && (
+            <div style={{height:2,background:"#1a1816",flexShrink:0}}>
+              <div style={{height:"100%",background:"#c9a96e",width:`${((step)/5)*100}%`,transition:"width 0.4s ease"}}/>
+            </div>
+          )}
+
+          {/* 대화 */}
+          <div style={{flex:1,overflowY:"auto",padding:"20px 18px 8px",display:"flex",flexDirection:"column",gap:18}}>
+            {messages.map((m,i)=>(
+              <div key={i} className="bub" style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+                {m.role==="user" ? (
+                  <div style={{maxWidth:"78%",background:"#1c1a16",border:"1px solid #272420",borderRadius:"18px 18px 4px 18px",padding:"11px 15px",fontSize:14,color:"#9a8e7e",lineHeight:1.75}}>{m.text}</div>
+                ) : (
+                  <div style={{maxWidth:"88%",fontSize:15,color:"#d0c4b0",lineHeight:1.95,fontWeight:300,letterSpacing:"0.03em"}}>{m.text}</div>
+                )}
+              </div>
+            ))}
+            {loading && <div className="bub"><TypingDots/></div>}
+
+            {/* 칩 선택지 */}
+            {!loading && !done && currentStepDef.chips.length > 0 && (
+              <div className="bub" style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:4}}>
+                {currentStepDef.chips.map(c=>(
+                  <Chip key={c} label={c} onClick={()=>proceed(c)}/>
+                ))}
+              </div>
+            )}
+
+            {/* 완료 버튼 */}
+            {done && (
+              <div className="bub" style={{textAlign:"center",marginTop:16}}>
+                <button onClick={onBack} style={{background:"#c9a96e",border:"none",borderRadius:20,padding:"10px 24px",color:"#0f0e0c",fontSize:13,fontFamily:"inherit",cursor:"pointer"}}>처음으로 돌아가기</button>
+              </div>
+            )}
+            <div ref={bottomRef}/>
+          </div>
+
+          {/* 입력 */}
+          {!done && (
+            <div style={{padding:"10px 14px 16px",borderTop:"1px solid #1e1c18",flexShrink:0,background:"#0f0e0c"}}>
+              <div style={{display:"flex",alignItems:"flex-end",gap:10,background:"#141210",border:"1px solid #252220",borderRadius:20,padding:"10px 12px"}}>
+                <textarea
+                  ref={taRef}
+                  value={input}
+                  onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();proceed(input);}}}
+                  placeholder={currentStepDef.inputHint}
+                  rows={1}
+                  style={{flex:1,background:"none",border:"none",color:"#c4b8a4",fontSize:15,fontFamily:"'Noto Serif KR',serif",lineHeight:1.65,minHeight:26}}
+                />
+                <button onClick={()=>proceed(input)} disabled={!input.trim()||loading}
+                  style={{width:36,height:36,borderRadius:"50%",flexShrink:0,background:input.trim()&&!loading?"#c9a96e":"#222018",border:"none",cursor:input.trim()&&!loading?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.2s"}}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke={input.trim()&&!loading?"#0f0e0c":"#3a3530"} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── 멘토 대화 화면 ────────────────────────────────────────────────
+    function MentoScreen({mentor, config, sbClient, onBack}) {
+      const [messages, setMessages] = useState([]);
+      const [input, setInput]       = useState("");
+      const [loading, setLoading]   = useState(false);
+      const [saveStatus, setSave]   = useState("");
+      const [sessionId]             = useState(genSid);
+      const bottomRef = useRef(null);
+      const taRef     = useRef(null);
+
+      useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,loading]);
+      useEffect(()=>{
+        if(taRef.current){ taRef.current.style.height="auto"; taRef.current.style.height=Math.min(taRef.current.scrollHeight,100)+"px"; }
+      },[input]);
+
+      const saveReflection = async (question, answer) => {
+        if (!sbClient || !config.userId) return;
+        setSave("saving");
+        const {error} = await sbClient.from("reflection").insert({
+          user_id:config.userId, session_id:sessionId, mentor_type:mentor.id,
+          session_type:"manual", question, answer, status:"pending",
+        });
+        await sbClient.from("event").insert({user_id:config.userId,event_type:"reflection_started",source_app:"my_mento",payload_table:"reflection"});
+        setSave(error?"error":"saved");
+        setTimeout(()=>setSave(""),2000);
+      };
+
+      const send = async () => {
+        if (!input.trim()||loading) return;
+        const text = input.trim();
+        setInput("");
+        const newMsgs = [...messages,{role:"user",content:text}];
+        setMessages(newMsgs);
+        setLoading(true);
+        try {
+          const res = await fetch("https://api.anthropic.com/v1/messages",{
+            method:"POST",
+            headers:{"Content-Type":"application/json","x-api-key":config.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+            body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:mentor.prompt+BASE_RULES,messages:newMsgs})
+          });
+          const d = await res.json();
+          const reply = d.content?.[0]?.text||"잠시 후 다시 시도해 주세요.";
+          setMessages([...newMsgs,{role:"assistant",content:reply}]);
+          await saveReflection(reply, text);
+        } catch {
+          setMessages([...newMsgs,{role:"assistant",content:"연결 오류가 생겼어요."}]);
+        }
+        setLoading(false);
+      };
+
+      const started = messages.length > 0;
+
+      return (
+        <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#0f0e0c",fontFamily:"'Noto Serif KR',Georgia,serif"}}>
+          <div style={{padding:"16px 18px 14px",borderBottom:"1px solid #1e1c18",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div>
+              <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,fontWeight:300,color:"#c9a96e",letterSpacing:"0.1em"}}>MyMento</div>
+              <div style={{fontSize:10,color:"#4a4030",letterSpacing:"0.14em",marginTop:2}}>{mentor.label} 모드</div>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {saveStatus==="saving" && <span style={{fontSize:10,color:"#4a4030"}}>저장 중...</span>}
+              {saveStatus==="saved"  && <span style={{fontSize:10,color:"#c9a96e"}}>✓ 저장됨</span>}
+              {saveStatus==="error"  && <span style={{fontSize:10,color:"#8a4040"}}>저장 실패</span>}
+              <button onClick={onBack} style={{background:"none",border:"1px solid #2a2520",borderRadius:20,padding:"5px 12px",color:"#4a4540",fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>처음으로</button>
+            </div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"20px 18px 8px",display:"flex",flexDirection:"column",gap:22}}>
+            {!started && (
+              <div style={{textAlign:"center",padding:"40px 0 20px",animation:"fadeUp 0.5s ease forwards"}}>
+                <p style={{fontFamily:"'Cormorant Garamond',serif",fontSize:17,fontWeight:300,color:"#5a5248",lineHeight:1.9}}>
+                  {mentor.label}으로서 함께하겠습니다.<br/>
+                  <span style={{fontSize:14,color:"#3a3530"}}>무엇이든 꺼내보세요</span>
+                </p>
+              </div>
+            )}
+            {messages.map((msg,i)=>(
+              <div key={i} className="bub" style={{display:"flex",justifyContent:msg.role==="user"?"flex-end":"flex-start"}}>
+                {msg.role==="user" ? (
+                  <div style={{maxWidth:"78%",background:"#1c1a16",border:"1px solid #272420",borderRadius:"18px 18px 4px 18px",padding:"11px 15px",fontSize:14,color:"#9a8e7e",lineHeight:1.75}}>{msg.content}</div>
+                ) : (
+                  <div style={{maxWidth:"88%"}}>
+                    <div style={{fontSize:9,color:"#4a4030",letterSpacing:"0.2em",marginBottom:7}}>{mentor.label.toUpperCase()}</div>
+                    <div style={{fontSize:15,color:"#d0c4b0",lineHeight:1.95,letterSpacing:"0.03em",fontWeight:300}}>{msg.content}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {loading && <div className="bub"><div style={{fontSize:9,color:"#4a4030",letterSpacing:"0.2em",marginBottom:7}}>{mentor.label.toUpperCase()}</div><TypingDots/></div>}
+            <div ref={bottomRef}/>
+          </div>
+
+          <div style={{padding:"10px 14px 16px",borderTop:"1px solid #1e1c18",flexShrink:0,background:"#0f0e0c"}}>
+            <div style={{display:"flex",alignItems:"flex-end",gap:10,background:"#141210",border:"1px solid #252220",borderRadius:20,padding:"10px 12px"}}>
+              <textarea ref={taRef} value={input} onChange={e=>setInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+                placeholder={started?"계속 이야기해 주세요...":"오늘 있었던 일을 적어보세요..."} rows={1}
+                style={{flex:1,background:"none",border:"none",color:"#c4b8a4",fontSize:15,fontFamily:"'Noto Serif KR',serif",lineHeight:1.65,minHeight:26}}/>
+              <button onClick={send} disabled={!input.trim()||loading}
+                style={{width:36,height:36,borderRadius:"50%",flexShrink:0,background:input.trim()&&!loading?"#c9a96e":"#222018",border:"none",cursor:input.trim()&&!loading?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.2s"}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke={input.trim()&&!loading?"#0f0e0c":"#3a3530"} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── 메인 앱 ──────────────────────────────────────────────────────
+    function App() {
+      const [screen, setScreen] = useState("home"); // home | mentor | procras | settings | history
+      const [config, setConfig] = useState(loadCfg);
+      const [mentor, setMentor] = useState(null);
+
+      const sbClient = getSB(config.sbUrl, config.sbAnon);
+      const isReady  = config.apiKey && config.sbUrl && config.sbAnon && config.userId;
+
+      const handleSaveCfg = (c) => { saveCfg(c); setConfig(c); setScreen("home"); };
+      const goMentor = (m) => { if(!isReady){setScreen("settings");return;} setMentor(m); setScreen("mentor"); };
+      const goProcras = () => { if(!isReady){setScreen("settings");return;} setScreen("procras"); };
+
+      if (screen==="settings")  return <SettingsScreen  current={config}   onSave={handleSaveCfg} onCancel={isReady?()=>setScreen("home"):null}/>;
+      if (screen==="history")   return <HistoryScreen   sbClient={sbClient} userId={config.userId} onBack={()=>setScreen("home")}/>;
+      if (screen==="mentor")    return <MentoScreen     mentor={mentor}    config={config} sbClient={sbClient} onBack={()=>setScreen("home")}/>;
+      if (screen==="procras")   return <ProcrasScreen   config={config}    sbClient={sbClient} onBack={()=>setScreen("home")}/>;
+
+      // ── 홈 화면 ──
+      return (
+        <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#0f0e0c",fontFamily:"'Noto Serif KR',Georgia,serif"}}>
+          {/* 헤더 */}
+          <div style={{padding:"16px 18px 14px",borderBottom:"1px solid #1e1c18",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,fontWeight:300,color:"#c9a96e",letterSpacing:"0.1em"}}>MyMento</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setScreen("history")} style={{background:"none",border:"none",cursor:"pointer",padding:4}}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="#3a3530" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              </button>
+              <button onClick={()=>setScreen("settings")} style={{background:"none",border:"none",cursor:"pointer",padding:4}}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#3a3530" strokeWidth="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#3a3530" strokeWidth="1.5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"24px 20px"}}>
+            {/* 인트로 */}
+            <div style={{textAlign:"center",marginBottom:32}}>
+              <div style={{width:46,height:46,borderRadius:"50%",border:"1px solid #2a2520",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",animation:"breathe 3s ease-in-out infinite"}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:"#c9a96e",opacity:0.9}}/>
+              </div>
+              <p style={{fontFamily:"'Cormorant Garamond',serif",fontSize:16,fontWeight:300,color:"#7a6e60",lineHeight:1.9,letterSpacing:"0.05em"}}>오늘 어떤 도움이 필요한가요?</p>
+            </div>
+
+            {/* 설정 미완료 안내 */}
+            {!isReady && (
+              <div style={{textAlign:"center",marginBottom:20,padding:"10px 14px",background:"#141210",borderRadius:10,border:"1px solid #2a2010"}}>
+                <span style={{fontSize:11,color:"#8a6030"}}>⚠ 설정이 필요합니다 </span>
+                <button onClick={()=>setScreen("settings")} style={{fontSize:11,color:"#c9a96e",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>설정하기 →</button>
+              </div>
+            )}
+
+            {/* 미루기 해결 버튼 (강조) */}
+            <button className="card" onClick={goProcras}
+              style={{width:"100%",background:"#1a1510",border:"1px solid #3a2a10",borderRadius:16,padding:"18px 20px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",fontFamily:"inherit",marginBottom:16,animationDelay:"0s",opacity:0}}>
+              <div>
+                <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:18,fontWeight:300,color:"#c9a96e",letterSpacing:"0.08em",marginBottom:4}}>지금 하기 싫어요</div>
+                <div style={{fontSize:11,color:"#6a5030",letterSpacing:"0.1em"}}>미루기 해결 · 생각을 행동으로</div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="#6a5030" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+
+            {/* 구분선 */}
+            <div style={{display:"flex",alignItems:"center",gap:12,margin:"8px 0 16px"}}>
+              <div style={{flex:1,height:1,background:"#1a1816"}}/>
+              <span style={{fontSize:10,color:"#3a3530",letterSpacing:"0.14em"}}>멘토 선택</span>
+              <div style={{flex:1,height:1,background:"#1a1816"}}/>
+            </div>
+
+            {/* 멘토 카드 */}
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {MENTORS.map((m,i)=>(
+                <button key={m.id} className="card" onClick={()=>goMentor(m)}
+                  style={{background:"#141210",border:"1px solid #252220",borderRadius:16,padding:"14px 20px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",fontFamily:"inherit",animationDelay:`${(i+1)*0.08}s`,opacity:0}}>
+                  <div>
+                    <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:17,fontWeight:300,color:"#c9a96e",letterSpacing:"0.08em",marginBottom:3}}>{m.label}</div>
+                    <div style={{fontSize:11,color:"#4a4540",letterSpacing:"0.1em"}}>{m.sub}</div>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="#3a3530" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", ()=>{ navigator.serviceWorker.register("sw.js"); });
+    }
+  </script>
+</body>
+</html>
